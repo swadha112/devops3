@@ -22,8 +22,13 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install deps
-        run: npm ci
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Run tests
         run: npm test
@@ -38,17 +43,27 @@ jobs:
         id: vars
         run: echo "TAG=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-      - name: Build Docker image
+      - name: Build image
         run: docker build -t $IMAGE_NAME:${{ steps.vars.outputs.TAG }} -t $IMAGE_NAME:latest .
 
-      - name: Push Docker image
+      - name: Push image
         run: |
           docker push $IMAGE_NAME:${{ steps.vars.outputs.TAG }}
           docker push $IMAGE_NAME:latest
 
-      # "Deploy" step – simplest form: run container on the runner
       - name: Run container (demo deploy)
         run: |
           docker run -d --name app -p 3000:3000 $IMAGE_NAME:${{ steps.vars.outputs.TAG }}
-          sleep 5
-          curl -f http://localhost:3000
+          # wait for app
+          for i in {1..10}; do
+            if curl -s http://localhost:3000 > /dev/null; then
+              echo "App is up ✅"
+              exit 0
+            fi
+            echo "Waiting for app to start ($i/10)..."
+            docker logs app --tail 20 || true
+            sleep 2
+          done
+          echo "App failed to start ❌"
+          docker logs app
+          exit 1
